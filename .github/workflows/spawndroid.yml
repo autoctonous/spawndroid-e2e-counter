@@ -47,7 +47,7 @@ jobs:
                   time.sleep(2)
               assert pkg in source, 'Installed app must be visible in UI hierarchy after 40s; foreground XML starts: ' + source[:600]
               print('PASS: Appium session created, app activated, UI hierarchy read on poll', attempt + 1)
-              assert os.environ.get('QA_FORCE_FAIL', '0') != '1', 'Intentional QA failure after successful Appium smoke'
+              assert 'Count: 999999' in source, 'Intentional UI assertion failure: expected counter text Count: 999999 was absent'
           except Exception as exc:
               if hasattr(exc, 'read'):
                   print('HTTP diagnostic:', exc.read(2000).decode(errors='replace'))
@@ -73,5 +73,5 @@ jobs:
       - name: Run Appium on SpawnDroid
         env:
           SPAWNDROID_API_KEY: ${{ secrets.SPAWNDROID_API_KEY }}
-          QA_FORCE_FAIL: '0'
+          QA_FORCE_FAIL: '1'
         run: npx --yes spawndroid run --config qa.yaml

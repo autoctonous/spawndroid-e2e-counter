@@ -42,6 +42,8 @@ jobs:
               print('PASS: Appium session created, app activated, UI hierarchy read')
               assert os.environ.get('QA_FORCE_FAIL', '0') != '1', 'Intentional QA failure after successful Appium smoke'
           except Exception as exc:
+              if hasattr(exc, 'read'):
+                  print('HTTP diagnostic:', exc.read(2000).decode(errors='replace'))
               error = str(exc)
               print('FAIL:', error)
           finally:

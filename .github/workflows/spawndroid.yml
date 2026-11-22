@@ -36,10 +36,17 @@ jobs:
           try:
               value = req('POST', '/session', {'capabilities': {'alwaysMatch': {'platformName':'Android', 'appium:automationName':'UiAutomator2', 'appium:udid':os.environ['SPAWNDROID_UDID'], 'appium:noReset':True}}})
               sid = value['sessionId']
-              req('POST', '/session/' + sid + '/execute/sync', {'script':'mobile: activateApp', 'args':[{'appId':os.environ['SPAWNDROID_APP_PACKAGE']}]})
-              source = req('GET', '/session/' + sid + '/source')
-              assert os.environ['SPAWNDROID_APP_PACKAGE'] in source, 'Installed app must be visible in UI hierarchy'
-              print('PASS: Appium session created, app activated, UI hierarchy read')
+              pkg = os.environ['SPAWNDROID_APP_PACKAGE']
+              req('POST', '/session/' + sid + '/execute/sync', {'script':'mobile: activateApp', 'args':[{'appId':pkg}]})
+              source = ''
+              attempt = 0
+              for attempt in range(20):
+                  source = req('GET', '/session/' + sid + '/source')
+                  if pkg in source:
+                      break
+                  time.sleep(2)
+              assert pkg in source, 'Installed app must be visible in UI hierarchy after 40s; foreground XML starts: ' + source[:600]
+              print('PASS: Appium session created, app activated, UI hierarchy read on poll', attempt + 1)
               assert os.environ.get('QA_FORCE_FAIL', '0') != '1', 'Intentional QA failure after successful Appium smoke'
           except Exception as exc:
               if hasattr(exc, 'read'):
@@ -54,7 +61,7 @@ jobs:
               case = ET.SubElement(suite, 'testcase', classname='Counter', name='launch_and_read_ui')
               if error: ET.SubElement(case, 'failure', message=error).text = error
               ET.ElementTree(suite).write('junit.xml', encoding='unicode')
-          sys.exit(1 if error else 0)
+              sys.exit(1 if error else 0)
           PY
           cat > qa.yaml <<'YAML'
           version: 1

@@ -1,10 +1,10 @@
-name: spawndroid
+name: Appium QA
 on:
   pull_request:
 jobs:
-  preview:
+  smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -12,24 +12,57 @@ jobs:
           distribution: temurin
           java-version: 17
       - uses: gradle/actions/setup-gradle@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - run: ./gradlew :app:assembleDebug
-      - name: Upload the build for its preview
+      - name: Prepare Appium smoke test
+        run: |
+          cat > smoke.py <<'PY'
+          import os, json, urllib.request, sys, time
+          import xml.etree.ElementTree as ET
+          base = os.environ['SPAWNDROID_WD_URL'].rstrip('/')
+          def req(method, path, data=None):
+              body = None if data is None else json.dumps(data).encode()
+              r = urllib.request.Request(base + path, data=body, method=method, headers={'Content-Type':'application/json'})
+              with urllib.request.urlopen(r, timeout=90) as response:
+                  result = json.load(response)
+              if isinstance(result.get('value'), dict) and result['value'].get('error'):
+                  raise RuntimeError(result['value'])
+              return result.get('value')
+          sid = None
+          error = None
+          started = time.time()
+          try:
+              value = req('POST', '/session', {'capabilities': {'alwaysMatch': {'platformName':'Android', 'appium:automationName':'UiAutomator2', 'appium:udid':os.environ['SPAWNDROID_UDID'], 'appium:noReset':True}}})
+              sid = value['sessionId']
+              req('POST', '/session/' + sid + '/execute/sync', {'script':'mobile: activateApp', 'args':[{'appId':os.environ['SPAWNDROID_APP_PACKAGE']}]})
+              source = req('GET', '/session/' + sid + '/source')
+              assert os.environ['SPAWNDROID_APP_PACKAGE'] in source, 'Installed app must be visible in UI hierarchy'
+              print('PASS: Appium session created, app activated, UI hierarchy read')
+              assert os.environ.get('QA_FORCE_FAIL', '0') != '1', 'Intentional QA failure after successful Appium smoke'
+          except Exception as exc:
+              error = str(exc)
+              print('FAIL:', error)
+          finally:
+              if sid:
+                  try: req('DELETE', '/session/' + sid)
+                  except Exception as exc: print('Appium cleanup:', exc)
+              suite = ET.Element('testsuite', name='SpawnDroid Appium smoke', tests='1', failures=str(int(error is not None)), time=str(time.time()-started))
+              case = ET.SubElement(suite, 'testcase', classname='Counter', name='launch_and_read_ui')
+              if error: ET.SubElement(case, 'failure', message=error).text = error
+              ET.ElementTree(suite).write('junit.xml', encoding='unicode')
+          sys.exit(1 if error else 0)
+          PY
+          cat > qa.yaml <<'YAML'
+          version: 1
+          app: app/build/outputs/apk/debug/app-debug.apk
+          command: [python3, smoke.py]
+          report: junit.xml
+          timeout: 300
+          YAML
+      - name: Run Appium on SpawnDroid
         env:
           SPAWNDROID_API_KEY: ${{ secrets.SPAWNDROID_API_KEY }}
-          APK: app/build/outputs/apk/debug/app-debug.apk
-          API: https://app.spawndroid.io
-        run: |
-          auth="Authorization: Bearer $SPAWNDROID_API_KEY"
-          presign=$(curl -fsS -X POST "$API/api/apps/presign" -H "$auth" \
-            -H "Content-Type: application/json" \
-            -d "{\"filename\":\"app.apk\",\"size\":$(stat -c%s "$APK")}")
-          curl -fsS -X PUT "$(jq -r .url <<<"$presign")" \
-            -H "Content-Type: $(jq -r '.contentType // "application/octet-stream"' <<<"$presign")" \
-            --data-binary @"$APK"
-          jq -n --arg key "$(jq -r .key <<<"$presign")" \
-            --arg repo "${{ github.repository }}" \
-            --argjson pr "${{ github.event.pull_request.number }}" \
-            --arg sha "${{ github.event.pull_request.head.sha }}" \
-            '{key: $key, filename: "app.apk", github: {repository: $repo, pullNumber: $pr, headSha: $sha}}' |
-            curl -fsS -X POST "$API/api/apps" -H "$auth" \
-              -H "Content-Type: application/json" --data @- > /dev/null
+          QA_FORCE_FAIL: '0'
+        run: npx --yes spawndroid run --config qa.yaml

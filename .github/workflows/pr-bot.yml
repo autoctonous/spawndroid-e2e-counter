@@ -1,0 +1,21 @@
+name: PR bot
+on: pull_request
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  device:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        variant: [crash, anr, x86only]
+    steps:
+      - name: Fetch the test build
+        run: curl -fsSL -o app.apk https://github.com/autoctonous/faultlab-stress-apks/releases/download/stress-apks/faultlab-${{ matrix.variant }}.apk
+      - uses: spawndroid/cli@v0.2.0
+        with:
+          api-key: ${{ secrets.SPAWNDROID_API_KEY }}
+          app: app.apk
